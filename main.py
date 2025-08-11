@@ -19,7 +19,7 @@ import vosk
 LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente
 SAMPLE_RATE = 16000
 # Tamanho do bloco menor => menor latência (cada bloco ~0.25s se 4000 amostras)
-BLOCKSIZE = 4000  # Ajuste (opções comuns: 1600, 3200, 4000, 8000). Menor = mais CPU, mais rapidez.
+BLOCKSIZE = 3200  # Ajuste (opções comuns: 1600, 3200, 4000, 8000). Menor = mais CPU, mais rapidez.
 
 
 def ensure_vosk_model(path: str):
@@ -59,6 +59,8 @@ rec = vosk.KaldiRecognizer(model, SAMPLE_RATE)
 # AUDIO STREAM
 # ===========================
 q = queue.Queue()
+# Fila para mensagens de texto (resultado parcial/final) -> consumida só na thread principal
+ui_updates = queue.Queue()
 
 
 def audio_callback(indata, frames, time, status):
@@ -86,7 +88,6 @@ def process_audio():
   while True:
     data = q.get()
 
-    # Resultado final disponível para o chunk
     if rec.AcceptWaveform(data):
       try:
         result = json.loads(rec.Result())
@@ -94,30 +95,35 @@ def process_audio():
         continue
       final_text = result.get("text", "").strip()
       if final_text:
-        _schedule_text_update(final_text)
+        ui_updates.put(final_text)
         last_partial = ""
     else:
-      # Resultado parcial (streaming)
       try:
         pres = json.loads(rec.PartialResult())
       except json.JSONDecodeError:
         continue
       partial = pres.get("partial", "").strip()
       now = time.time()
-      # Evita atualizar com o mesmo texto ou rápido demais
       if partial and partial != last_partial and (now - last_update_ts) >= PARTIAL_MIN_INTERVAL:
-        _schedule_text_update(partial + " …")  # Sinaliza que é parcial
+        ui_updates.put(partial + " …")
         last_partial = partial
         last_update_ts = now
 
 
-def _schedule_text_update(text: str):
-  """Agenda atualização de texto na thread principal (Tkinter não é thread-safe)."""
+def _drain_ui_updates():
+  """Consome mensagens pendentes da fila de UI mantendo thread principal segura."""
   try:
-    root.after(0, label_var.set, text)
-  except RuntimeError:
-    # Root pode ter sido destruído ao sair.
+    processed = 0
+    while True:
+      text = ui_updates.get_nowait()
+      label_var.set(text)
+      processed += 1
+      if processed >= 10:  # evita monopolizar loop se houver enxurrada
+        break
+  except queue.Empty:
     pass
+  # agenda próxima checagem (intervalo curto para baixa latência visual)
+  root.after(40, _drain_ui_updates)  # ~25fps
 
 
 # ===========================
@@ -126,9 +132,13 @@ def _schedule_text_update(text: str):
 root = tk.Tk()
 root.title("Reunião Ao Vivo - Open Source")
 root.geometry("640x160")
+root.attributes("-topmost", True)  # Always on top
 label_var = tk.StringVar(value="Iniciando microfone e modelo…")
 label = tk.Label(root, textvariable=label_var, font=("Arial", 16), wraplength=620, justify="left")
 label.pack(pady=20, padx=10)
+
+# Inicia polling de atualizações de UI
+root.after(50, _drain_ui_updates)
 
 # Thread para processamento
 threading.Thread(target=process_audio, daemon=True).start()
