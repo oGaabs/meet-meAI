@@ -6,17 +6,15 @@ import threading
 import time
 import tkinter as tk
 import urllib.request
-import wave
 import zipfile
 
-import numpy as np
-import sounddevice as sd  # Audio
-import vosk
+import sounddevice # Áudio: sounddevice + numpy
+import vosk # STT (Speech-to-Text):
 
 # ===========================
 # CONFIGURAÇÕES
 # ===========================
-LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente
+LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente3
 SAMPLE_RATE = 16000
 # Tamanho do bloco menor => menor latência (cada bloco ~0.25s se 4000 amostras)
 BLOCKSIZE = 3200  # Ajuste (opções comuns: 1600, 3200, 4000, 8000). Menor = mais CPU, mais rapidez.
@@ -30,7 +28,7 @@ def ensure_vosk_model(path: str):
   if os.path.isdir(path) and any(os.scandir(path)):
     return
 
-  print("[INFO] Modelo Vosk não encontrado. Baixando modelo pequeno PT-BR...")
+  print("[INFO] Modelo Vosk não encontrado. Baixando modelo...")
   url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
   zip_name = "vosk-model-en-us-0.22-lgraph.zip"
   try:
@@ -52,8 +50,12 @@ def ensure_vosk_model(path: str):
 ensure_vosk_model(LANG_MODEL_PATH)
 
 # Carrega Vosk STT depois de garantir modelo
+print("Loading Vosk model... (this may take a few seconds)")
 model = vosk.Model(LANG_MODEL_PATH)
 rec = vosk.KaldiRecognizer(model, SAMPLE_RATE)
+rec.SetWords(True)
+print("Modelo Vosk carregado com sucesso!")
+
 
 # ===========================
 # AUDIO STREAM
@@ -130,10 +132,10 @@ def _drain_ui_updates():
 # GUI
 # ===========================
 root = tk.Tk()
-root.title("Reunião Ao Vivo - Open Source")
+root.title("Live Meeting Transcription")
 root.geometry("640x160")
 root.attributes("-topmost", True)  # Always on top
-label_var = tk.StringVar(value="Iniciando microfone e modelo…")
+label_var = tk.StringVar(value="Ready…")
 label = tk.Label(root, textvariable=label_var, font=("Arial", 16), wraplength=620, justify="left")
 label.pack(pady=20, padx=10)
 
@@ -144,6 +146,6 @@ root.after(50, _drain_ui_updates)
 threading.Thread(target=process_audio, daemon=True).start()
 
 # Inicia captura
-with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCKSIZE, dtype="int16",
-                       channels=1, callback=audio_callback):
+with sounddevice.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCKSIZE, dtype="int16",
+                                channels=1, callback=audio_callback):
   root.mainloop()
