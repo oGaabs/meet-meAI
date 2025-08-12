@@ -10,7 +10,7 @@ import zipfile
 
 import sounddevice  # Áudio: sounddevice + numpy
 import vosk  # STT (Speech-to-Text)
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 # ===========================
@@ -63,8 +63,15 @@ print("Modelo Vosk carregado com sucesso!")
 # AUDIO STREAM
 # ===========================
 q = queue.Queue()
-# Fila para mensagens de texto (resultado parcial/final) -> consumida só na thread principal
-ui_updates = queue.Queue()
+
+
+class UiBus(QObject):
+  """Barramento de sinais para atualizar a UI de forma thread-safe (Qt-idiomático).
+
+  textChanged(str) é emitido pelo worker (thread de áudio) e entregue
+  na thread principal via conexão enfileirada automática do Qt.
+  """
+  textChanged = Signal(str)
 
 
 def audio_callback(indata, frames, time, status):
@@ -77,13 +84,13 @@ def audio_callback(indata, frames, time, status):
 # ===========================
 
 
-def process_audio():
+def process_audio(bus: UiBus):
   """Thread: consome áudio da fila e produz resultados parciais e finais.
 
   Estratégia de baixa latência:
   - Alimenta o recognizer com blocos menores.
   - Se não houver resultado final (AcceptWaveform False), mostra parcial.
-  - Usa root.after para garantir thread-safety no Tkinter.
+  - Emite sinais Qt (queued) para atualizar a UI na thread principal.
   """
   last_partial = ""
   last_update_ts = 0.0
@@ -99,7 +106,7 @@ def process_audio():
         continue
       final_text = result.get("text", "").strip()
       if final_text:
-        ui_updates.put(final_text)
+        bus.textChanged.emit(final_text)
         last_partial = ""
     else:
       try:
@@ -109,30 +116,13 @@ def process_audio():
       partial = pres.get("partial", "").strip()
       now = time.time()
       if partial and partial != last_partial and (now - last_update_ts) >= PARTIAL_MIN_INTERVAL:
-        ui_updates.put(partial + " …")
+        bus.textChanged.emit(partial + " …")
         last_partial = partial
         last_update_ts = now
 
 
-def _drain_ui_updates(label: QLabel):
-  """Consome mensagens pendentes e atualiza o rótulo (thread-safe via QTimer)."""
-  try:
-    processed = 0
-    last_text = None
-    while True:
-      last_text = ui_updates.get_nowait()
-      processed += 1
-      if processed >= 10:
-        break
-  except queue.Empty:
-    pass
-
-  if last_text is not None:
-    label.setText(last_text)
-
-
 class MainWindow(QWidget):
-  def __init__(self):
+  def __init__(self, bus: UiBus):
     super().__init__()
     self.setWindowTitle("Live Meeting Transcription")
     self.setMinimumSize(640, 160)
@@ -144,21 +134,19 @@ class MainWindow(QWidget):
 
     self.label.setStyleSheet("font-size: 16px;")
     layout.addWidget(self.label)
-
-    # Timer para puxar atualizações com baixa latência (~25 fps)
-    self.timer = QTimer(self)
-    self.timer.setInterval(40)
-    self.timer.timeout.connect(lambda: _drain_ui_updates(self.label))
-    self.timer.start()
+    # Conecta diretamente o sinal ao slot, Qt fará queued connection entre threads
+    bus.textChanged.connect(self.label.setText)
 
 
 def main():
   app = QApplication(sys.argv)
-  window = MainWindow()
+  # Cria o barramento de sinais após o QApplication
+  bus = UiBus()
+  window = MainWindow(bus)
   window.show()
 
   # Thread para processamento
-  threading.Thread(target=process_audio, daemon=True).start()
+  threading.Thread(target=process_audio, args=(bus,), daemon=True).start()
 
   # Inicia captura de áudio e loop da aplicação Qt
   with sounddevice.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCKSIZE, dtype="int16",
