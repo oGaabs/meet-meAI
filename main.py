@@ -2,19 +2,21 @@ import json
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
-import tkinter as tk
 import urllib.request
 import zipfile
 
-import sounddevice # Áudio: sounddevice + numpy
-import vosk # STT (Speech-to-Text):
+import sounddevice  # Áudio: sounddevice + numpy
+import vosk  # STT (Speech-to-Text)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 # ===========================
 # CONFIGURAÇÕES
 # ===========================
-LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente3
+LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente
 SAMPLE_RATE = 16000
 # Tamanho do bloco menor => menor latência (cada bloco ~0.25s se 4000 amostras)
 BLOCKSIZE = 3200  # Ajuste (opções comuns: 1600, 3200, 4000, 8000). Menor = mais CPU, mais rapidez.
@@ -112,40 +114,60 @@ def process_audio():
         last_update_ts = now
 
 
-def _drain_ui_updates():
-  """Consome mensagens pendentes da fila de UI mantendo thread principal segura."""
+def _drain_ui_updates(label: QLabel):
+  """Consome mensagens pendentes e atualiza o rótulo (thread-safe via QTimer)."""
   try:
     processed = 0
+    last_text = None
     while True:
-      text = ui_updates.get_nowait()
-      label_var.set(text)
+      last_text = ui_updates.get_nowait()
       processed += 1
-      if processed >= 10:  # evita monopolizar loop se houver enxurrada
+      if processed >= 10:
         break
   except queue.Empty:
     pass
-  # agenda próxima checagem (intervalo curto para baixa latência visual)
-  root.after(40, _drain_ui_updates)  # ~25fps
+
+  if last_text is not None:
+    label.setText(last_text)
 
 
-# ===========================
-# GUI
-# ===========================
-root = tk.Tk()
-root.title("Live Meeting Transcription")
-root.geometry("640x160")
-root.attributes("-topmost", True)  # Always on top
-label_var = tk.StringVar(value="Ready…")
-label = tk.Label(root, textvariable=label_var, font=("Arial", 16), wraplength=620, justify="left")
-label.pack(pady=20, padx=10)
+class MainWindow(QWidget):
+  def __init__(self):
+    super().__init__()
+    self.setWindowTitle("Live Meeting Transcription")
+    self.setMinimumSize(640, 160)
+    self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
-# Inicia polling de atualizações de UI
-root.after(50, _drain_ui_updates)
+    layout = QVBoxLayout(self)
+    self.label = QLabel("Ready…", self)
+    self.label.setWordWrap(True)
 
-# Thread para processamento
-threading.Thread(target=process_audio, daemon=True).start()
+    self.label.setStyleSheet("font-size: 16px;")
+    layout.addWidget(self.label)
 
-# Inicia captura
-with sounddevice.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCKSIZE, dtype="int16",
-                                channels=1, callback=audio_callback):
-  root.mainloop()
+    # Timer para puxar atualizações com baixa latência (~25 fps)
+    self.timer = QTimer(self)
+    self.timer.setInterval(40)
+    self.timer.timeout.connect(lambda: _drain_ui_updates(self.label))
+    self.timer.start()
+
+
+def main():
+  app = QApplication(sys.argv)
+  window = MainWindow()
+  window.show()
+
+  # Thread para processamento
+  threading.Thread(target=process_audio, daemon=True).start()
+
+  # Inicia captura de áudio e loop da aplicação Qt
+  with sounddevice.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCKSIZE, dtype="int16",
+                                  channels=1, callback=audio_callback):
+    ret = app.exec()
+
+  # Fecha stream antes de encerrar o processo
+  sys.exit(ret)
+
+
+if __name__ == "__main__":
+  main()

@@ -1,9 +1,9 @@
 # meet-meAI
 
-Aplicativo simples de transcrição em tempo real (Português) usando Vosk + Tkinter.
+Aplicativo simples de transcrição em tempo real usando Vosk + PySide6.
 
 ## Requisitos
-- Python 3.8 - 3.11
+- Python 3.8 - 3.12
 - Microfone
 - Windows / Linux / macOS
 
@@ -19,21 +19,22 @@ pip install -r requirements.txt
 ```cmd
 python main.py
 ```
-Na primeira execução o script baixa automaticamente o modelo pequeno PT-BR do Vosk
-(~50MB) e coloca na pasta `model_pt`.
+Na primeira execução o script baixa automaticamente um modelo pequeno EN-US do Vosk
+(~50MB) e coloca na pasta `model_en`.
 
 ## Estrutura
-- `main.py` – captura áudio, faz reconhecimento e mostra texto na GUI.
+- `main.py` – captura áudio, faz reconhecimento e mostra texto na GUI (PySide6).
 - `requirements.txt` – dependências mínimas.
 
 ## Trocar modelo
 Se quiser usar outro modelo (maior e mais preciso):
 1. Baixe em https://alphacephei.com/vosk/models
-2. Extraia e renomeie a pasta para `model_pt` (substituindo a existente).
+2. Extraia e renomeie a pasta para `model_en` (substituindo a existente) ou ajuste a
+	constante `LANG_MODEL_PATH` em `main.py`.
 
 ## Observações
-- Este fork remove diarização de falantes para evitar necessidade de autenticação.
-- Para adicionar diarização depois, pode integrar pyannote.audio com um token Hugging Face.
+- Interface migrada para PySide6 e ajustada para ser responsiva (texto com quebra automática
+	e janela redimensionável).
 
 ## Licença
 Uso educacional/demonstração. Verifique licenças dos modelos Vosk.
