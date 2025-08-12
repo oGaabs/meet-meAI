@@ -18,47 +18,56 @@ from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
 # ===========================
 # CONFIGURAÇÕES
 # ===========================
-LANG_MODEL_PATH = "model_en"  # Pasta onde o modelo será baixado automaticamente
 SAMPLE_RATE = 16000
 # Tamanho do bloco menor => menor latência (cada bloco ~0.25s se 4000 amostras)
 BLOCKSIZE = 3200  # Ajuste (opções comuns: 1600, 3200, 4000, 8000). Menor = mais CPU, mais rapidez.
 
 
-def ensure_vosk_model(path: str):
-  """Baixa e extrai automaticamente um modelo pequeno de EN-US do Vosk se não existir.
-
-  Usa um modelo (cerca de ~50MB). Se quiser outro, substitua a URL.
-  """
-  if os.path.isdir(path) and any(os.scandir(path)):
+def download_and_extract_model(url: str, target_dir: str, extracted_dir_name: str):
+  """Baixa um zip de modelo, extrai e renomeia para target_dir."""
+  if os.path.isdir(target_dir) and any(os.scandir(target_dir)):
     return
 
-  print("[INFO] Modelo Vosk não encontrado. Baixando modelo...")
-  url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
-  zip_name = "vosk-model-en-us-0.22.zip"
+  print(f"[INFO] Modelo não encontrado. Baixando de {url} ...")
+  zip_name = extracted_dir_name + ".zip"
   try:
     urllib.request.urlretrieve(url, zip_name)
     print("[INFO] Download concluído. Extraindo...")
     with zipfile.ZipFile(zip_name, 'r') as zf:
       zf.extractall('.')
-    # Renomeia pasta extraída para LANG_MODEL_PATH
-    extracted_dir = "vosk-model-en-us-0.22"
-    if os.path.exists(path):
-      shutil.rmtree(path)
-    os.rename(extracted_dir, path)
-    print("[INFO] Modelo preparado em", path)
+    if os.path.exists(target_dir):
+      shutil.rmtree(target_dir)
+    os.rename(extracted_dir_name, target_dir)
+    print(f"[INFO] Modelo preparado em {target_dir}")
   finally:
     if os.path.exists(zip_name):
       os.remove(zip_name)
 
 
-ensure_vosk_model(LANG_MODEL_PATH)
+def ensure_vosk_model(path: str):
+  url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+  extracted_dir = "vosk-model-en-us-0.22"
+  download_and_extract_model(url, path, extracted_dir)
+
+
+def ensure_vosk_speaker_model(path: str):
+  url = "https://alphacephei.com/vosk/models/vosk-model-spk-0.4.zip"
+  extracted_dir = "vosk-model-spk-0.4"
+  download_and_extract_model(url, path, extracted_dir)
+
+
+ensure_vosk_model("model_en")
+ensure_vosk_speaker_model("model_spk")
 
 # Carrega Vosk STT depois de garantir modelo
 print("Loading Vosk model... (this may take a few seconds)")
-model = vosk.Model(LANG_MODEL_PATH)
+model = vosk.Model("model_en")
 rec = vosk.KaldiRecognizer(model, SAMPLE_RATE)
 rec.SetWords(True)
-print("Modelo Vosk carregado com sucesso!")
+
+print("Loading Vosk speaker model... (this may take a few seconds)")
+speaker_model = vosk.SpkModel("model_spk")
+rec.SetSpkModel(speaker_model)
 
 
 # ===========================
@@ -136,7 +145,7 @@ class SpeakerLog(QWidget):
   def __init__(self, parent=None):
     super().__init__(parent)
 
-    self._speaker_name = "Speaker 1"
+    self._speaker_name = "S1"
     # Paleta simples e determinística; com 1 palestrante escolhemos uma cor agradável
     self._speaker_color = QColor("#4FC3F7")  # azul claro
 
