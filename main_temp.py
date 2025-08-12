@@ -199,10 +199,13 @@ def _append_history(item: dict):
 
 # --- Import utility tools ---
 
+
 root = tk.Tk()
 root.title("Live Meeting Transcription")
-root.geometry("1100x520")
+root.geometry("700x600")
 root.configure(bg="#000000")
+# Always on top
+root.attributes("-topmost", True)
 try:
   root.iconbitmap(default="")
 except Exception:
@@ -224,14 +227,16 @@ main_pane.pack(fill="both", expand=True, padx=10, pady=10)
 content_frame = ttk.Frame(main_pane)
 content_frame.pack(side="left", fill="both", expand=True)
 
+
 # HISTÓRICO (topo)
 history_label = ttk.Label(content_frame, text="Histórico (final)", font=("Segoe UI", 11, "bold"))
 history_label.pack(anchor="w")
 
+# Reduce width of speaker log/history
 history_text = scrolledtext.ScrolledText(content_frame, height=16, wrap="word", font=("Segoe UI", 11),
                                          background="#111111", foreground="#FFFFFF", insertbackground="#FFFFFF",
-                                         borderwidth=0, padx=8, pady=6)
-history_text.pack(fill="both", expand=True)
+                                         borderwidth=0, padx=8, pady=6, width=48)
+history_text.pack(fill="y", expand=False, anchor="w")
 history_text.configure(state="normal")
 
 # TEMPO REAL (abaixo)
@@ -240,7 +245,7 @@ realtime_frame.pack(fill="x", pady=(12, 0))
 realtime_label_title = ttk.Label(realtime_frame, text="Transcrição em tempo real", font=("Segoe UI", 11, "bold"))
 realtime_label_title.pack(anchor="w")
 realtime_var = tk.StringVar(value="Pronto…")
-realtime_label = ttk.Label(realtime_frame, textvariable=realtime_var, font=("Segoe UI", 15), wraplength=860, justify="left")
+realtime_label = ttk.Label(realtime_frame, textvariable=realtime_var, font=("Segoe UI", 15), wraplength=550, justify="left")
 realtime_label.pack(fill="x", pady=(4, 0))
 
 # Dica inferior
