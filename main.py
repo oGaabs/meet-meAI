@@ -10,8 +10,10 @@ import zipfile
 
 import sounddevice  # Áudio: sounddevice + numpy
 import vosk  # STT (Speech-to-Text)
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, Qt, QTime, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
+                               QScrollArea, QSplitter, QVBoxLayout, QWidget)
 
 # ===========================
 # CONFIGURAÇÕES
@@ -72,6 +74,8 @@ class UiBus(QObject):
   na thread principal via conexão enfileirada automática do Qt.
   """
   textChanged = Signal(str)
+  # Novo: sinal para segmentos finais (usar apenas para log cronológico/por palestrante)
+  finalSegment = Signal(str)
 
 
 def audio_callback(indata, frames, time, status):
@@ -107,6 +111,8 @@ def process_audio(bus: UiBus):
       final_text = result.get("text", "").strip()
       if final_text:
         bus.textChanged.emit(final_text)
+        # Emite também evento de segmento final para o log por palestrante
+        bus.finalSegment.emit(final_text)
         last_partial = ""
     else:
       try:
@@ -121,21 +127,132 @@ def process_audio(bus: UiBus):
         last_update_ts = now
 
 
+class SpeakerLog(QWidget):
+  """Lista rolável de segmentos com timestamp e cor por palestrante.
+
+  Por ora, sem diarização, usamos um único palestrante (Speaker 1).
+  """
+
+  def __init__(self, parent=None):
+    super().__init__(parent)
+
+    self._speaker_name = "Speaker 1"
+    # Paleta simples e determinística; com 1 palestrante escolhemos uma cor agradável
+    self._speaker_color = QColor("#4FC3F7")  # azul claro
+
+    outer = QVBoxLayout(self)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(0)
+
+    # Área de rolagem com container vertical
+    self.scroll = QScrollArea(self)
+    self.scroll.setWidgetResizable(True)
+    self.scroll.setFrameShape(QFrame.NoFrame)
+
+    self.container = QWidget()
+    self.vbox = QVBoxLayout(self.container)
+    self.vbox.setContentsMargins(8, 8, 8, 8)
+    self.vbox.setSpacing(8)
+    self.vbox.addStretch(1)
+
+    self.scroll.setWidget(self.container)
+    outer.addWidget(self.scroll)
+
+    # Estilo escuro
+    self.setStyleSheet(
+        """
+      QWidget#SpeakerRow { background: transparent; }
+      QLabel#Timestamp { color: #9aa0a6; font-size: 12px; }
+      QLabel#Speaker { font-weight: 600; font-size: 13px; }
+      QLabel#Utterance { color: #ffffff; font-size: 13px; }
+      QScrollArea { background: #000000; border: none; }
+      QScrollBar:vertical { background: #111; width: 10px; }
+      QScrollBar::handle:vertical { background: #333; min-height: 24px; border-radius: 5px; }
+      QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+      """
+    )
+
+  def _format_time(self) -> str:
+    # HH:MM:SS local
+    return QTime.currentTime().toString("HH:mm:ss")
+
+  def add_segment(self, text: str):
+    if not text:
+      return
+
+    row = QWidget(self.container)
+    row.setObjectName("SpeakerRow")
+    h = QHBoxLayout(row)
+    h.setContentsMargins(8, 8, 8, 0)
+    h.setSpacing(10)
+
+    ts = QLabel(self._format_time(), row)
+    ts.setObjectName("Timestamp")
+
+    spk = QLabel(self._speaker_name + ":", row)
+    spk.setObjectName("Speaker")
+    # nome do palestrante colorido
+    spk.setStyleSheet(f"color: {self._speaker_color.name()};")
+
+    utt = QLabel(text, row)
+    utt.setObjectName("Utterance")
+    utt.setWordWrap(True)
+
+    h.addWidget(ts)
+    h.addWidget(spk)
+    h.addWidget(utt, 1)
+
+    # Insere antes do stretch final
+    self.vbox.insertWidget(self.vbox.count() - 1, row)
+
+    # Auto-scroll para o fim
+    vsb = self.scroll.verticalScrollBar()
+    vsb.setValue(vsb.maximum())
+
+
 class MainWindow(QWidget):
   def __init__(self, bus: UiBus):
     super().__init__()
     self.setWindowTitle("Live Meeting Transcription")
-    self.setMinimumSize(640, 160)
+    self.setMinimumSize(720, 360)
     self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
 
-    layout = QVBoxLayout(self)
-    self.label = QLabel("Ready…", self)
-    self.label.setWordWrap(True)
+    # Estilo escuro moderno (janela inteira)
+    self.setStyleSheet(
+        """
+      QWidget { background-color: #000000; color: #ffffff; }
+      QLabel#Current { font-size: 16px; }
+      QFrame#TopPane { background: #0b0b0b; border-bottom: 1px solid #202124; }
+      """
+    )
 
-    self.label.setStyleSheet("font-size: 16px;")
-    layout.addWidget(self.label)
-    # Conecta diretamente o sinal ao slot, Qt fará queued connection entre threads
+    root = QVBoxLayout(self)
+
+    splitter = QSplitter(Qt.Vertical, self)
+    root.addWidget(splitter)
+
+    # Topo: painel atual (mantém self.label intacto)
+    top = QFrame(self)
+    top.setObjectName("TopPane")
+    top_layout = QVBoxLayout(top)
+    top_layout.setContentsMargins(12, 12, 12, 12)
+    top_layout.setSpacing(8)
+
+    self.label = QLabel("Ready…", top)
+    self.label.setObjectName("Current")
+    self.label.setWordWrap(True)
+    top_layout.addWidget(self.label)
+
+    # Base: log por palestrante com rolagem automática
+    self.speakerLog = SpeakerLog(self)
+
+    splitter.addWidget(top)
+    splitter.addWidget(self.speakerLog)
+    splitter.setSizes([2, 3])  # proporção inicial
+
+    # Conexões de sinais (não altera o comportamento da label atual)
     bus.textChanged.connect(self.label.setText)
+    bus.finalSegment.connect(self.speakerLog.add_segment)
 
 
 def main():
