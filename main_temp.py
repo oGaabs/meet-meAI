@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import os
 import queue
@@ -5,13 +6,14 @@ import shutil
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
-from tkinter import scrolledtext
 import urllib.request
 import zipfile
+from tkinter import scrolledtext, ttk
 
-import sounddevice # Áudio: sounddevice + numpy
-import vosk # STT (Speech-to-Text):
+import sounddevice  # Áudio: sounddevice + numpy
+import vosk  # STT (Speech-to-Text):
+
+from utils_tools import argo_translate, date_to_text, number_to_text
 
 # ===========================
 # CONFIGURAÇÕES
@@ -112,7 +114,7 @@ def process_audio():
         # Speaker placeholder (pode evoluir p/ diarização real)
         speaker = "S1"
         history_updates.put({
-          "timestamp": timestamp,
+            "timestamp": timestamp,
             "speaker": speaker,
             "text": final_text
         })
@@ -194,9 +196,12 @@ def _append_history(item: dict):
 # ===========================
 # GUI
 # ===========================
+
+# --- Import utility tools ---
+
 root = tk.Tk()
 root.title("Live Meeting Transcription")
-root.geometry("900x520")
+root.geometry("1100x520")
 root.configure(bg="#000000")
 try:
   root.iconbitmap(default="")
@@ -212,21 +217,25 @@ except Exception:
 style.configure("TFrame", background="#000000")
 style.configure("TLabel", background="#000000", foreground="#FFFFFF")
 
-container = ttk.Frame(root)
-container.pack(fill="both", expand=True, padx=10, pady=10)
+main_pane = ttk.Frame(root)
+main_pane.pack(fill="both", expand=True, padx=10, pady=10)
+
+# --- Main content (left) ---
+content_frame = ttk.Frame(main_pane)
+content_frame.pack(side="left", fill="both", expand=True)
 
 # HISTÓRICO (topo)
-history_label = ttk.Label(container, text="Histórico (final)", font=("Segoe UI", 11, "bold"))
+history_label = ttk.Label(content_frame, text="Histórico (final)", font=("Segoe UI", 11, "bold"))
 history_label.pack(anchor="w")
 
-history_text = scrolledtext.ScrolledText(container, height=16, wrap="word", font=("Segoe UI", 11),
+history_text = scrolledtext.ScrolledText(content_frame, height=16, wrap="word", font=("Segoe UI", 11),
                                          background="#111111", foreground="#FFFFFF", insertbackground="#FFFFFF",
                                          borderwidth=0, padx=8, pady=6)
 history_text.pack(fill="both", expand=True)
 history_text.configure(state="normal")
 
 # TEMPO REAL (abaixo)
-realtime_frame = ttk.Frame(container)
+realtime_frame = ttk.Frame(content_frame)
 realtime_frame.pack(fill="x", pady=(12, 0))
 realtime_label_title = ttk.Label(realtime_frame, text="Transcrição em tempo real", font=("Segoe UI", 11, "bold"))
 realtime_label_title.pack(anchor="w")
@@ -235,8 +244,84 @@ realtime_label = ttk.Label(realtime_frame, textvariable=realtime_var, font=("Seg
 realtime_label.pack(fill="x", pady=(4, 0))
 
 # Dica inferior
-footer = ttk.Label(container, text="Ctrl+C para sair", font=("Segoe UI", 9))
+footer = ttk.Label(content_frame, text="Ctrl+C para sair", font=("Segoe UI", 9))
 footer.pack(anchor="e", pady=(6, 0))
+
+# --- Utility tools panel (right) ---
+utils_frame = ttk.Frame(main_pane)
+utils_frame.pack(side="right", fill="y", padx=(16, 0))
+ttk.Label(utils_frame, text="Utilitários", font=("Segoe UI", 12, "bold")).pack(pady=(0, 8))
+
+# Number to text
+ttk.Label(utils_frame, text="Número para texto:").pack(anchor="w")
+num_entry = ttk.Entry(utils_frame, width=18)
+num_entry.pack(anchor="w")
+num_result = tk.StringVar()
+ttk.Label(utils_frame, textvariable=num_result, foreground="#4FC3F7").pack(anchor="w", pady=(0, 6))
+
+
+# Atualiza automaticamente o resultado ao digitar
+def update_num_result(*args):
+  val = num_entry.get()
+  try:
+    n = int(val)
+    num_result.set(number_to_text(n))
+  except Exception:
+    num_result.set("(inválido)")
+
+
+num_entry.bind('<KeyRelease>', lambda e: update_num_result())
+
+
+# Date to text with dropdowns
+ttk.Label(utils_frame, text="Data para texto:").pack(anchor="w")
+date_frame = ttk.Frame(utils_frame)
+date_frame.pack(anchor="w")
+# Day dropdown
+day_var = tk.StringVar(value="1")
+day_menu = ttk.Combobox(date_frame, textvariable=day_var, width=3, values=[str(i) for i in range(1, 32)])
+day_menu.pack(side="left")
+ttk.Label(date_frame, text="/").pack(side="left")
+# Month dropdown
+month_var = tk.StringVar(value="1")
+month_menu = ttk.Combobox(date_frame, textvariable=month_var, width=3, values=[str(i) for i in range(1, 13)])
+month_menu.pack(side="left")
+ttk.Label(date_frame, text="/").pack(side="left")
+# Year dropdown
+current_year = dt.datetime.now().year
+year_var = tk.StringVar(value=str(current_year))
+year_menu = ttk.Combobox(date_frame, textvariable=year_var, width=5, values=[str(y) for y in range(current_year - 50, current_year + 11)])
+year_menu.pack(side="left")
+date_result = tk.StringVar()
+ttk.Label(utils_frame, textvariable=date_result, foreground="#81C784").pack(anchor="w", pady=(0, 6))
+
+
+# Atualiza automaticamente o resultado ao mudar qualquer campo
+def update_date_result(*args):
+  y = year_var.get()
+  m = month_var.get().zfill(2)
+  d = day_var.get().zfill(2)
+  date_str = f"{y}-{m}-{d}"
+  date_result.set(date_to_text(date_str))
+
+
+day_var.trace_add('write', update_date_result)
+month_var.trace_add('write', update_date_result)
+year_var.trace_add('write', update_date_result)
+
+# Argo translator
+ttk.Label(utils_frame, text="Tradutor Argo (demo):").pack(anchor="w")
+argo_entry = ttk.Entry(utils_frame, width=18)
+argo_entry.pack(anchor="w")
+argo_result = tk.StringVar()
+ttk.Label(utils_frame, textvariable=argo_result, foreground="#FFB74D").pack(anchor="w", pady=(0, 6))
+
+
+def on_argo_translate():
+  argo_result.set(argo_translate(argo_entry.get()))
+
+
+ttk.Button(utils_frame, text="Traduzir", command=on_argo_translate).pack(anchor="w", pady=(0, 8))
 
 # Inicia polling de atualizações de UI
 root.after(80, _drain_ui_updates)
