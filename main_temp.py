@@ -31,15 +31,15 @@ def ensure_vosk_model(path: str):
     return
 
   print("[INFO] Modelo Vosk não encontrado. Baixando modelo...")
-  url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
-  zip_name = "vosk-model-en-us-0.22-lgraph.zip"
+  url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+  zip_name = "vosk-model-en-us-0.22.zip"
   try:
     urllib.request.urlretrieve(url, zip_name)
     print("[INFO] Download concluído. Extraindo...")
     with zipfile.ZipFile(zip_name, 'r') as zf:
       zf.extractall('.')
     # Renomeia pasta extraída para LANG_MODEL_PATH
-    extracted_dir = "vosk-model-en-us-0.22-lgraph"
+    extracted_dir = "vosk-model-en-us-0.22"
     if os.path.exists(path):
       shutil.rmtree(path)
     os.rename(extracted_dir, path)
